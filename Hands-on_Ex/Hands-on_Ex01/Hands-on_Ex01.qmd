@@ -11,7 +11,7 @@ execute:
 pacman::p_load(tidyverse, sf)
 ```
 
-### Importing a geospatial data in shapefile format
+### **Importing polygon feature data in shapefile format**
 
 ```{r}
 mpsz <- st_read(dsn = "data/geospatial",
@@ -118,7 +118,7 @@ preschool3414 <- st_transform(preschool,
 st_geometry(preschool3414)
 ```
 
-### Geoprocessing with sf package 
+### Geoprocessing with sf package
 
 **The scenario:** The authority is planning to upgrade the exiting cycling path. To do so, they need to acquire 5 metres of reserved land on the both sides of the current cycling path. You are tasked to determine the extend of the land need to be acquired and their total area.
 
@@ -131,7 +131,7 @@ buffer_cycling$AREA <- st_area(buffer_cycling)
 sum(buffer_cycling$AREA)
 ```
 
-### Point-in-polygon count 
+### Point-in-polygon count
 
 **The scenario:** A pre-school service group want to find out the numbers of pre-schools in each Planning Subzone.
 
@@ -157,7 +157,7 @@ mpsz3414 <- mpsz3414 %>%
   mutate(`PreSch Density` = `PreSch Count`/Area * 1000000)
 ```
 
-## Exploratory Data Analysis (EDA) 
+## Exploratory Data Analysis (EDA)
 
 ### Plotting histogram to reveal distribution of PreSch Density
 
