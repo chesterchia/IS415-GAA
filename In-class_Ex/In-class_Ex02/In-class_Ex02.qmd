@@ -2,3 +2,19 @@
 title: "In-class Exercise 2"
 author: "Chester Chia"
 ---
+
+### Dependencies used
+
+-   arrow
+
+-   lubridate
+
+-   tidyverse
+
+-   tmap
+
+-   sf
+
+```{r}
+pacman::p_load(arrow, lubridate, tidyverse, tmap, sf)
+```
