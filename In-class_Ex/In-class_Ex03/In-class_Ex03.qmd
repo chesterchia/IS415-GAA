@@ -1,0 +1,189 @@
+---
+title: "In-class Exercise 3"
+date: "January 22, 2024"
+author: "Chester Chia"
+execute:
+  warning: false
+---
+
+### Installing Maptools
+
+```{r}
+#| eval: false
+install.packages("maptools", repos = "https://packagemanager.posit.co/cran/2023-10-13")
+```
+
+```{r}
+pacman::p_load(maptools, sf, raster, spatstat, tmap, tidyverse)
+```
+
+### Importing Spatial Data
+
+```{r}
+childcare_sf <- st_read("data/ChildCareServices.geojson") %>%
+  st_transform(crs = 3414)
+```
+
+```{r}
+#sg_sf <- st_read(dsn = "data", layer="CostalOutline")
+mpsz_sf <- st_read(dsn = "data", layer="MP14_SUBZONE_WEB_PL") %>%
+  st_transform(3414)
+```
+
+```{r}
+plot(mpsz_sf)
+```
+
+### Creating Coastal Outline
+
+```{r}
+sg_sf <- mpsz_sf %>%
+  st_union() %>%
+  st_transform(crs=3414)
+```
+
+```{r}
+plot(sg_sf)
+```
+
+### Mapping the data sets
+
+```{r}
+tm_shape(sg_sf) +
+  tm_polygons() +
+  tm_shape(mpsz_sf) +
+  tm_polygons() +
+  tm_shape(childcare_sf) +
+  tm_dots()
+```
+
+Can also use a pin map:
+
+```{r}
+tmap_mode('view')
+tm_shape(childcare_sf)+
+  tm_dots()
+```
+
+```{r}
+tmap_mode('plot')
+```
+
+### Creating ppp objects: sf method
+
+```{r}
+childcare_ppp <- as.ppp(childcare_sf)
+```
+
+```{r}
+summary(childcare_ppp)
+```
+
+```{r}
+plot(childcare_ppp)
+```
+
+### Handling duplicated points
+
+```{r}
+any(duplicated(childcare_ppp))
+```
+
+Count co-incidence points:
+
+```{r}
+multiplicity(childcare_ppp)
+```
+
+Check how many locations have more than one point event:
+
+```{r}
+sum(multiplicity(childcare_ppp) > 1)
+```
+
+```{r}
+tmap_mode('view')
+tm_shape(childcare_sf) +
+  tm_dots(alpha=0.4, 
+          size=0.05)
+```
+
+```{r}
+tmap_mode('plot')
+```
+
+Jittering approach:
+
+```{r}
+childcare_ppp_jit <- rjitter(childcare_ppp, 
+                             retry=TRUE, 
+                             nsim=1, 
+                             drop=TRUE)
+```
+
+Check if any duplicated point:
+
+```{r}
+any(duplicated(childcare_ppp_jit))
+```
+
+### Creating owin object: sf method
+
+```{r}
+sg_owin <- as.owin(sg_sf)
+```
+
+```{r}
+plot(sg_owin)
+```
+
+```{r}
+summary(sg_owin)
+```
+
+### Extracting study area using different method
+
+```{r}
+pg <- mpsz_sf %>%
+  filter(PLN_AREA_N == "PUNGGOL")
+tm <- mpsz_sf %>%
+  filter(PLN_AREA_N == "TAMPINES")
+ck <- mpsz_sf %>%
+  filter(PLN_AREA_N == "CHOA CHU KANG")
+jw <- mpsz_sf %>%
+  filter(PLN_AREA_N == "JURONG WEST")
+```
+
+```{r}
+par(mfrow=c(2,2), mar=c(3,3,1,1))
+plot(pg, main = "Punggol")
+```
+
+```{r}
+plot(tm, main = "Tampines")
+```
+
+```{r}
+plot(ck, main = "Choa Chu Kang")
+```
+
+```{r}
+plot(jw, main = "Jurong West")
+```
+
+## NKDE
+
+### Installing packages
+
+```{r}
+pacman::p_load(sf, spNetwork, tmap, classInt, viridis, tidyverse)
+```
+
+### Data Import
+
+```{r}
+network <- st_read(dsn="data/geospatial",
+                   layer="Punggol_St")
+childcare <- st_read(dsn="data/geospatial",
+                     layer="Punggol_CC")
+```
