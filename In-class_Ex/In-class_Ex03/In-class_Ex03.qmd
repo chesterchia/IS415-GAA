@@ -171,7 +171,7 @@ plot(ck, main = "Choa Chu Kang")
 plot(jw, main = "Jurong West")
 ```
 
-## NKDE
+## Network Constrained Spatial Point Patterns Analysis
 
 ### Installing packages
 
@@ -186,4 +186,71 @@ network <- st_read(dsn="data/geospatial",
                    layer="Punggol_St")
 childcare <- st_read(dsn="data/geospatial",
                      layer="Punggol_CC")
+```
+
+### Visualising the Geospatial Data
+
+```{r}
+tmap_mode("view")
+tm_shape(childcare) +
+  tm_dots() +
+  tm_shape(network) +
+  tm_lines()
+tmap_mode("plot")
+```
+
+### NKDE Analysis
+
+Preparing lixel objects:
+
+```{r}
+lixels <- lixelize_lines(network,
+                         750,
+                         mindist = 375)
+```
+
+Generating line centre points:
+
+```{r}
+samples <- lines_center(lixels)
+```
+
+Performing NetKDE:
+
+```{r}
+densities <- nkde(network,
+                  events = childcare,
+                  w = rep(1, nrow(childcare)),
+                  samples = samples,
+                  kernel_name = "quartic",
+                  bw = 300,
+                  div = "bw",
+                  method = "simple",
+                  digits = 1,
+                  tol = 1,
+                  grid_shape = c(1, 1),
+                  max_depth = 8,
+                  agg = 5,
+                  sparse = TRUE,
+                  verbose = FALSE)
+```
+
+```{r}
+samples$density <- densities
+lixels$density <- densities
+```
+
+```{r}
+# rescaling to help the mapping
+samples$density <- samples$density*1000
+lixels$density <- lixels$density*1000
+```
+
+```{r}
+tmap_mode('view')
+tm_shape(lixels)+
+  tm_lines(col="density")+
+tm_shape(childcare)+
+  tm_dots()
+tmap_mode('plot')
 ```
