@@ -1,0 +1,163 @@
+---
+title: "Take-Home Exercise 1"
+author: "Chester Chia"
+date: "23 January 2024"
+execute: 
+  eval: true
+  echo: true
+  warning: false
+---
+
+## 1.0 Overview
+
+Human mobility, the movement of human beings in space and time, reflects the spatial-temporal characteristics of human behavior. With the advancement Information and Communication Technologies (ICT) especially smart phone, a large volume of data related to human mobility have been collected. By using appropriate GIS analysis methods, these data are potentially useful in supporting smart city planning and management.
+
+In Singapore, one of the important source of data related to human mobility is from [Land Transport Authority (LTA) DataMall](https://datamall.lta.gov.sg/content/datamall/en.html). Two data sets related to human mobility are provided by the portal, they are: Passenger Volume by Origin Destination Train Stations and Passenger Volume by Origin Destination Bus Stops. One of the limitation of these data sets is that their location are biased to either bus stops or MRT/LRT stations. In 2020, another very interesting human mobility data set called [Grab Posisi](https://engineering.grab.com/grab-posisi) was released by GRAB, one of the largest shared taxi operator in South-east Asia. There are two data sets been released and one of them is for Singapore
+
+### 1.1 Objectives
+
+**The tasks of this take-home exercise are as follows:**
+
+-   Using appropriate function of **sf** and **tidyverse**, preparing the following geospatial data layer in sf tibble data.frames:
+    -   Grab taxi location points either by origins or destinations.
+    -   Road layer within Singapore excluding outer islands.
+    -   Singapore boundary layer excluding outer islands
+-   Using the extracted data, derive traditional Kernel Density Estimation layers.
+-   Using the extracted data, derive either Network Kernel Density Estimation (NKDE) or Temporal Network Kernel Density Estimation (TNKDE)
+-   Using appropriate **tmap** functions, display the kernel density layers on openstreetmap of Singapore.
+-   Describe the spatial patterns revealed by the kernel density maps.
+
+## 2.0 Setup
+
+### 2.1 Installing packages
+
+```{r}
+pacman::p_load(arrow, lubridate, tidyverse, sf, tmap, maptools, spatstat)
+```
+
+## 3.0 Data Wrangling
+
+### 3.1 Importing data
+
+```{r}
+grabp <- open_dataset("data/aspatial/GrabPosisi/") %>%
+  as.data.frame()
+mpsz <- st_read("data/geospatial/MasterPlan2019SubzoneBoundaryNoSeaGEOJSON.geojson")
+osm <- st_read("data/geospatial/malaysia-singapore-brunei-latest-free.shp", layer="gis_osm_roads_free_1")
+```
+
+### 3.2 Pre-processing
+
+```{r}
+grabp$pingtimestamp <- as_datetime(grabp$pingtimestamp)
+```
+
+```{r}
+origin_df <- grabp %>%
+  group_by(trj_id) %>%
+  arrange(pingtimestamp) %>%
+  filter(row_number()==1) %>%
+  mutate(weekday = wday(pingtimestamp,
+                        label=TRUE,
+                        abbr=TRUE),
+         start_hr = factor(hour(pingtimestamp)),
+         day = factor(mday(pingtimestamp))) %>%
+  st_as_sf(coords = c("rawlng", "rawlat"),
+           crs = 4326) %>%
+  st_transform(crs = 3414)
+
+destination_df <- grabp %>%
+  group_by(trj_id) %>%
+  arrange(desc(pingtimestamp)) %>%
+  filter(row_number()==1) %>%
+  mutate(weekday = wday(pingtimestamp,
+                        label=TRUE,
+                        abbr=TRUE),
+         end_hr = factor(hour(pingtimestamp)),
+         day = factor(mday(pingtimestamp))) %>%
+  st_as_sf(coords = c("rawlng", "rawlat"),
+           crs = 4326) %>%
+  st_transform(crs = 3414)
+
+head(origin_df)
+head(destination_df)
+```
+
+```{r}
+origin_df <- origin_df %>% dplyr::select('trj_id', 'pingtimestamp', 'geometry', 'weekday', 'start_hr', 'day', 'geometry') 
+destination_df <- destination_df %>% dplyr::select('trj_id', 'pingtimestamp', 'geometry', 'weekday', 'end_hr', 'day', 'geometry')
+```
+
+```{r}
+write_rds(origin_df, "data/rds/origin.rds")
+write_rds(destination_df, "data/rds/destination.rds")
+```
+
+```{r}
+destination_df <- read_rds("data/rds/destination.rds")
+origin_df <- read_rds("data/rds/origin.rds")
+```
+
+```{r}
+head(osm)
+```
+
+```{r}
+length(which(st_is_valid(mpsz) == FALSE))
+mpsz[which(st_is_valid(mpsz) == FALSE), ]
+
+mpsz <- st_make_valid(mpsz)
+mpsz <- st_zm(mpsz)
+```
+
+### 3.3 CRS Adjustments
+
+```{r}
+st_crs(mpsz)
+st_crs(osm)
+```
+
+```{r}
+osm <- st_transform(osm, crs = 3414)
+```
+
+```{r}
+mpsz <- st_transform(mpsz, crs = 3414)
+```
+
+```{r}
+st_crs(mpsz)
+st_crs(osm)
+```
+
+```{r}
+osm <- osm %>% 
+  dplyr::select('osm_id', 'fclass')
+```
+
+```{r}
+plot(st_geometry(mpsz))
+```
+
+```{r}
+merged_sg <- st_union(mpsz) %>%
+    st_cast("POLYGON")
+merged_sg <- merged_sg[c(10, 45)]
+merged_sg <- st_as_sf(merged_sg)
+par(mfrow=c(1,2))
+plot(st_geometry(mpsz))
+plot(st_geometry(merged_sg))
+write_rds(merged_sg, "data/rds/merged_sg.rds")
+```
+
+```{r}
+merged_sg <- read_rds("data/rds/merged_sg.rds")
+```
+
+```{r}
+merged_st <- as_Spatial(merged_sg)
+merged_sg_sp <- as(merged_st, "SpatialPolygons")
+merged_sg_owin <- as(merged_sg_sp, "owin")
+
+write_rds(merged_sg_owin, "data/rds/merged_sg_owin.rds")
+```
