@@ -1,0 +1,107 @@
+---
+title: "Take-Home Exercise 2"
+author: "Chester Chia"
+date: 02-15-2024
+format:
+  html:
+    toc: true
+execute:
+  eval: true
+  echo: true
+  warning: false
+---
+
+## 1.0 Overview
+
+## 2.0 Setup
+
+```{r}
+pacman::p_load(sf, spdep, sfdep, tmap, tidyverse, smoothr, lubridate, nngeo)
+```
+
+## 3.0 Data Wrangling
+
+```{r}
+tn <- st_read(dsn="data/geospatial",
+              layer="TAINAN_VILLAGE")
+```
+
+```{r}
+dd <- read_csv("data/aspatial/Dengue_Daily.csv")
+```
+
+```{r}
+dd <- dd[, c(1, 10, 11)]
+names(dd)
+```
+
+```{r}
+names(dd) <- c("Onset", "X", "Y")
+names(dd)
+```
+
+```{r}
+options(digits = 15)
+dd[, c(2, 3)] <- lapply(dd[, c(2, 3)], as.numeric)
+head(dd)
+```
+
+```{r}
+sum(apply(dd, 1, function(x) any(is.na(x))))
+```
+
+```{r}
+dd <- na.omit(dd)
+sum(apply(dd, 1, function(x) any(is.na(x))))
+```
+
+```{r}
+hist(dd$Onset, breaks = "days", xlab = "Date", ylab = "Frequency", main = "Histogram of Date Ranges")
+```
+
+```{r}
+st_crs(tn)
+```
+
+```{r}
+dd_sf <- st_as_sf(dd, coords = c("X", "Y"),
+                      crs = 3824)
+st_crs(dd_sf)
+```
+
+```{r}
+head(dd_sf)
+```
+
+```{r}
+tnsz <- tn[tn$TOWNID %in% c("D01", "D02", "D04", "D06", "D07", "D08", "D32", "D39"), ] %>% 
+  subset(select = -NOTE)
+```
+
+```{r}
+head(tnsz)
+```
+
+```{r}
+plot(tnsz)
+```
+
+```{r}
+tnszu <- st_union(tnsz)
+plot(tnszu)
+```
+
+```{r}
+tnszuh <- st_remove_holes(tnszu)
+plot(tnszuh)
+```
+
+```{r}
+diff_tnsz <- st_difference(tnszuh, tnszu)
+plot(diff_tnsz)
+```
+
+```{r}
+hole <- st_intersection(dd_sf, diff_tnsz)
+head(hole)
+```
