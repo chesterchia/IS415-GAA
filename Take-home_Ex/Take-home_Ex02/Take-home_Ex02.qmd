@@ -13,13 +13,35 @@ execute:
 
 ## 1.0 Overview
 
+Dengue Hemorrhagic Fever (in short dengue fever) is one of the most widespread mosquito-borne diseases in the most tropical and subtropical regions. It is an acute disease caused by dengue virus infection which is transmitted by female Aedes aegypti and Aedes albopictus mosquitoes. In 2015, Taiwan had recorded the most severe dengue fever outbreak with more than 43,000 dengue cases and 228 deaths. Since then, the annual reported dengue fever cases were maintained at the level of not more than 200 cases. However, in 2023, Taiwan recorded 26703 dengue fever cases.
+
+### 1.1 Objectives
+
+The specific tasks of this take-home exercise are as follows:
+
+-   Using appropriate function of **sf** and **tidyverse**, preparing the following geospatial data layer:
+
+    -   a study area layer in sf polygon features. It must be at village level and confined to the D01, D02, D04, D06, D07, D08, D32 and D39 counties of Tainan City, Taiwan.
+    -   a dengue fever layer within the study area in sf point features. The dengue fever cases should be confined to epidemiology week 31-50, 2023.
+    -   a derived dengue fever layer in [spacetime s3 class of sfdep](https://sfdep.josiahparry.com/articles/spacetime-s3). It should contain, among many other useful information, a data field showing number of dengue fever cases by village and by epidemiology week.
+
+-   Using the extracted data, perform global spatial autocorrelation analysis by using [sfdep methods](https://is415-gaa-tskam.netlify.app/in-class_ex/in-class_ex05/in-class_ex05-glsa).
+
+-   Using the extracted data, perform local spatial autocorrelation analysis by using [sfdep methods](https://r4gdsa.netlify.app/chap10.html).
+
+-   Using the extracted data, perform emerging hotspot analysis by using [sfdep methods](https://is415-gaa-tskam.netlify.app/in-class_ex/in-class_ex05/in-class_ex05-ehsa).
+
+-   Describe the spatial patterns revealed by the analysis above.
+
 ## 2.0 Setup
 
 ```{r}
-pacman::p_load(sf, spdep, sfdep, tmap, tidyverse, smoothr, lubridate, nngeo)
+pacman::p_load(sf, spdep, sfdep, tmap, tidyverse, smoothr, lubridate, nngeo, Kendall)
 ```
 
 ## 3.0 Data Wrangling
+
+### 3.1 Loading the datasets
 
 ```{r}
 tn <- st_read(dsn="data/geospatial",
@@ -29,6 +51,10 @@ tn <- st_read(dsn="data/geospatial",
 ```{r}
 dd <- read_csv("data/aspatial/Dengue_Daily.csv")
 ```
+
+### 3.2 Data Preparation
+
+To make my life easier, I will rename the selected fields that are relevant for this exercise. Following this, I will then transform the coordinate strings into numerical values.
 
 ```{r}
 dd <- dd[, c(1, 10, 11)]
@@ -41,10 +67,11 @@ names(dd)
 ```
 
 ```{r}
-options(digits = 15)
 dd[, c(2, 3)] <- lapply(dd[, c(2, 3)], as.numeric)
 head(dd)
 ```
+
+Since there are NA values in the dataset, we have to remove them.
 
 ```{r}
 sum(apply(dd, 1, function(x) any(is.na(x))))
@@ -55,13 +82,13 @@ dd <- na.omit(dd)
 sum(apply(dd, 1, function(x) any(is.na(x))))
 ```
 
-```{r}
-hist(dd$Onset, breaks = "days", xlab = "Date", ylab = "Frequency", main = "Histogram of Date Ranges")
-```
+Same as the previous exercises, it is standard practice to check the CRS of the dataset.
 
 ```{r}
 st_crs(tn)
 ```
+
+Since it is 3824, I will convert dd's (dengue dataset) to 3824 as well.
 
 ```{r}
 dd_sf <- st_as_sf(dd, coords = c("X", "Y"),
@@ -69,13 +96,10 @@ dd_sf <- st_as_sf(dd, coords = c("X", "Y"),
 st_crs(dd_sf)
 ```
 
-```{r}
-head(dd_sf)
-```
+### 3.3 Preparing Study Area
 
 ```{r}
-tnsz <- tn[tn$TOWNID %in% c("D01", "D02", "D04", "D06", "D07", "D08", "D32", "D39"), ] %>% 
-  subset(select = -NOTE)
+tnsz <- tn[tn$TOWNID %in% c("D01", "D02", "D04", "D06", "D07", "D08", "D32", "D39"), ]
 ```
 
 ```{r}
@@ -86,22 +110,397 @@ head(tnsz)
 plot(tnsz)
 ```
 
+Similar to previous exercises, I will use `st_union` in order to check for gaps.
+
 ```{r}
 tnszu <- st_union(tnsz)
 plot(tnszu)
 ```
+
+I will use the `st_remove_holes` function from nngeo package.
 
 ```{r}
 tnszuh <- st_remove_holes(tnszu)
 plot(tnszuh)
 ```
 
+### 3.4 Confining cases
+
+Now I can begin confining the cases to the epidemiology week 31-50, 2023. To be precise, those dates are from 30/07/2023 - 16/12/2023
+
 ```{r}
-diff_tnsz <- st_difference(tnszuh, tnszu)
-plot(diff_tnsz)
+dd_sf_epiweeks <- dd_sf %>% 
+  filter(Onset >= as.Date("2023-07-30") & Onset <= as.Date("2023-12-16"))
+```
+
+Use `st_intersection` to get the points falling within the study area, and add epiweek column.
+
+```{r}
+d_sf <- st_intersection(dd_sf_epiweeks, tnszu)
+d_sf$epiweek <- epiweek(d_sf$Onset)
+```
+
+Subsequently, check for duplicate geometry.
+
+```{r}
+dupes <- any(duplicated(tnsz$VILLCODE))
+dupes
+```
+
+### 3.5 Aggregating Dengue Cases
+
+Since we eventually need to show the number of dengue fever cases by village as well, it makes sense to link each case with a village. We can do this using `st_join`
+
+```{r}
+d_village_sf <- st_join(tnsz, d_sf)
 ```
 
 ```{r}
-hole <- st_intersection(dd_sf, diff_tnsz)
-head(hole)
+d_village_sf <- d_village_sf[!is.na(d_village_sf$VILLCODE), ]
 ```
+
+Group by village code and epi week, replacing NA values with 31 (start week):
+
+```{r}
+d_village_sf_vc <- d_village_sf %>%
+  group_by(VILLCODE, VILLENG) %>%
+  summarise(count = sum(!is.na(epiweek)))
+
+d_village_sf_vc_epi <- d_village_sf %>%
+  group_by(VILLCODE, epiweek) %>%
+  summarise(count = sum(!is.na(epiweek)))
+
+d_village_sf_vc_epi$epiweek <- ifelse(is.na(d_village_sf_vc_epi$epiweek), 31, d_village_sf_vc_epi$epiweek)
+```
+
+```{r}
+plot(d_village_sf_vc_epi)
+```
+
+### 3.6 Spacetime Cube
+
+In order to handle NA values, we can assign a 0 value.
+
+```{r}
+temp <- expand.grid(VILLCODE=unique(d_village_sf_vc_epi$VILLCODE),
+                    epiweek=unique(d_village_sf_vc_epi$epiweek))
+merged <- merge(temp, d_village_sf_vc_epi, by=c("VILLCODE", "epiweek"), all.x=TRUE)
+merged$count[is.na(merged$count)] <- 0
+merged <- select(merged, -geometry)
+merged <- st_as_sf(distinct(merge(merged, d_village_sf_vc_epi[, c("VILLCODE", "geometry")],
+                                  by="VILLCODE", suffixes=c("", ".y"), all.x=TRUE)))
+```
+
+```{r}
+spacetime_cube <- as_spacetime(merged, "VILLCODE", "epiweek")
+is_spacetime_cube(spacetime_cube)
+```
+
+```{r}
+write_rds(spacetime_cube, "data/rds/spacetime_cube.rds")
+```
+
+## 4.0 Exploratary Data Analysis
+
+I am interested in seeing how the cases are distributed across time. To do this, I will look at the distribution of the cases across the epidiomiology weeks.
+
+```{r}
+tm_shape(d_village_sf_vc_epi) +
+  tm_polygons(col='white') +
+tm_shape(d_village_sf_vc_epi) +
+  tm_polygons("count",
+          palette = "Blues",
+          style="quantile") +
+  tm_facets(by="epiweek", free.coords = FALSE)
+```
+
+```{r}
+ggplot(d_sf, aes(x = epiweek)) +
+  geom_bar(fill = "red", color = "black") +
+ labs(x = "Epidemiology Week", y = "No. of Cases", title = "Cases across Epidemiology Weeks")
+```
+
+## 5.0 Global Measures of Spatial Autocorrelation
+
+### 5.1 Deriving contiguity weights
+
+```{r}
+wm_q.nb <- st_contiguity(d_village_sf_vc, queen=TRUE)
+wm_q.wt <- st_weights(wm_q.nb, style="W")
+wm_q.count <- d_village_sf_vc$count
+```
+
+### 5.2 Global Moran's I Test
+
+```{r}
+global_moran_test(wm_q.count,
+                  wm_q.nb,
+                  wm_q.wt)
+```
+
+### 5.3 Global Moran I's Permutation Test
+
+```{r}
+set.seed(1234)
+global_moran_perm(wm_q.count,
+                  wm_q.nb,
+                  wm_q.wt,
+                  nsim=99)
+```
+
+## 6.0 Local Measures of Spatial Autocorrelation
+
+### 6.1 Local Moran's I
+
+Compute Local Moran's I, and then appending it to the original dataframe for mapping later on.
+
+```{r}
+lmi <- local_moran(wm_q.count,
+                   wm_q.nb,
+                   wm_q.wt)
+d_village_sf_vc <- cbind(d_village_sf_vc, lmi)
+```
+
+### 6.2 Visualizing Local Moran's I
+
+Using choropleth mapping functions of `tmap` package, we can plot the local Moran’s I values
+
+```{r}
+map1 <- tm_shape(d_village_sf_vc) +
+  tm_fill(col="ii",
+          style="pretty",
+          palette="RdBu",
+          title="Local Moran's I of Dengue Cases") +
+  tm_borders(alpha = 0.5)
+
+map1
+```
+
+### 6.3 Mapping Local Moran's I p-values
+
+```{r}
+tm_shape(d_village_sf_vc) +
+  tm_fill(col="p_ii_sim",
+          breaks=c(-Inf, 0.2, 0.4, 0.6, 0.8, 1, Inf),
+          palette="Blues",
+          title="Local Moran's I p-values") +
+  tm_borders(alpha=0.8)
+```
+
+The villages that are darker blue signify more clustering, which are mostly centered in our study area.
+
+```{r}
+map2 <- tm_shape(d_village_sf_vc) +
+  tm_fill(col="p_ii_sim",
+          breaks=c(0, 0.001, 0.01, 0.05, 1),
+          palette="Blues",
+          title="Local Moran's I p-values") +
+  tm_borders(alpha=0.9) 
+
+tmap_arrange(map1, map2, ncol=2)
+```
+
+### 6.4 LISA Map
+
+```{r}
+quadrant <- vector(length=nrow(d_village_sf_vc))
+d_village_sf_vc$lag_count <- st_lag(wm_q.count, wm_q.nb, wm_q.wt)
+DV <- d_village_sf_vc$lag_count - mean(d_village_sf_vc$lag_count)     
+LM_I <- lmi[,1]   
+signif <- 0.05       
+quadrant[DV <0 & LM_I>0] <- "LOW - LOW"
+quadrant[DV >0 & LM_I<0] <- "LOW - HIGH"
+quadrant[DV <0 & LM_I<0] <- "HIGH - LOW"  
+quadrant[DV >0 & LM_I>0] <- "HIGH - HIGH"    
+quadrant[lmi[,5]>signif] <- 0
+
+d_village_sf_vc$quadrant <- quadrant
+```
+
+```{r}
+lisa_sig <- d_village_sf_vc  %>%
+  filter(p_ii < 0.05)
+tmap_mode("plot")
+
+map1 <- tm_shape(d_village_sf_vc) +
+  tm_polygons() +
+  tm_borders(alpha = 0.5) +
+  tm_shape(lisa_sig) +
+  tm_fill("quadrant",
+          palette="RdBu",
+          midpoint=0) +
+  tm_borders(alpha=0.5)
+
+map2 <- tm_shape(d_village_sf_vc) +
+  tm_polygons("count",
+              palette="Blues",
+              style="quantile",
+              n=10)
+
+tmap_arrange(map1, map2, ncol=2)
+```
+
+High-high areas, possibly urban centers, show high dengue counts and similar high counts in neighboring areas, suggesting clusters of outbreaks. Low-low areas could represent rural zones with fewer cases, and notably, high-low or low-high areas indicate outliers - regions where dengue case counts significantly differ from their surroundings.
+
+## 7.0 Hot Spot and Cold Spot Area Analysis
+
+### 7.1 Computation of Local Gi\*
+
+```{r}
+hcsa <- d_village_sf_vc %>%
+  cbind(local_gstar_perm(wm_q.count,
+                         wm_q.nb,
+                         wm_q.wt,
+                         nsim=99)) 
+```
+
+### 7.2 Visualizing Gi\*
+
+```{r}
+tm_shape(hcsa) +
+  tm_fill("gi_star",
+          palette="RdBu",
+          midpoint=0,
+          title="Gi*") +
+  tm_borders(alpha=0.5)
+```
+
+The Gi\* values decrease from the center as it spreads out toward the edges of the map, indicating higher random distribution of cases on the towns in the edges (villages).
+
+### 7.3 Visualizing p-value of HCSA
+
+```{r}
+tm_shape(hcsa) +
+  tm_fill("p_sim",
+          palette="RdBu",
+          midpoint=0) +
+  tm_borders(alpha=0.5)
+```
+
+```{r}
+map3 <- tm_shape(hcsa) +
+  tm_fill("gi_star",
+          palette="RdBu",
+          midpoint=0,
+          title="Gi* of Cases") + 
+  tm_borders(alpha = 0.5)
+
+map4 <- tm_shape(hcsa) +
+  tm_fill("p_value",
+          breaks = c(0, 0.001, 0.01, 0.05, 1),
+          palette="Blues",
+          title="p-value of Gi*") + 
+  tm_borders(alpha = 0.5)
+
+tmap_arrange(map3, map4, ncol = 2)
+```
+
+### 7.4 Visualizing Hot and Cold Spots
+
+```{r}
+hcsa_sig <- hcsa %>%
+  filter(p_sim < 0.05)
+
+hcsa_sig_map <- tm_shape(hcsa) +
+  tm_polygons() +
+  tm_borders(alpha = 0.5) +
+tm_shape(hcsa_sig) +
+  tm_fill("gi_star",
+          palette="RdBu",
+          midpoint=0,
+          title="Gi*") + 
+  tm_borders(alpha = 0.5) +
+  tm_scale_bar()
+
+tmap_arrange(map1, hcsa_sig_map, ncol = 2)
+```
+
+From the above plots, we can see that there are cold spots on the northern and southern parts of the island.
+
+## 8.0 Emerging Hot Spot Analysis
+
+In this section, we will be analyzing hot and cold spots over 5 weeks at a time, as well as the type of hot/cold spots (e.g. oscillating, persistent, intensifying etc.)
+
+```{r}
+ehsa_spt <- function(cube, week, geom) {
+  spt_n <- filter(cube, epiweek <= week)
+  spt_nb <- cube %>%
+    activate("geometry") %>%
+    mutate(nb = include_self(st_contiguity(geometry)),
+           wt = st_inverse_distance(nb, geometry,
+                                    scale = 1,
+                                    alpha = 1),
+           .before = 1) %>%
+    set_nbs("nb") %>%
+    set_wts("wt")
+  
+  EHSA <- emerging_hotspot_analysis(x=spt_n,
+                                    .var="count",
+                                    k=1,
+                                    nsim=99)
+  gghist <- ggplot(data=EHSA,
+                   aes(x=classification)) +
+    geom_bar(fill="light blue") +
+    coord_flip()
+  
+  tn_EHSA <- geom %>%
+    left_join(EHSA,
+              by=c("VILLCODE"="location")) %>%
+    mutate(`p_value` = replace(`p_value`, `p_value` > 0.05, NA),
+           `classification` = ifelse(is.na(`p_value`), NA, `classification`))
+  
+  plot(gghist)
+  
+  tm_shape(tn_EHSA) +
+    tm_fill(col="classification",
+            title="Classification",
+            breaks=c("consecutive coldspot", "consecutive hotspot", "new coldspot", "new hotspot", "no pattern detected", "intensifying coldspot", "intensifying hotspot", "oscilating coldspot", "oscilating hotspot", "persistent coldspot", "persistent hotspot", "sporadic coldspot", "sporadic hotspot"
+  )) +
+    tm_borders()
+}
+
+```
+
+::: panel-tabset
+### Week 30-35
+
+```{r}
+ehsa_spt(spacetime_cube, 35, tnsz)
+```
+
+### Week 30-40
+
+```{r}
+ehsa_spt(spacetime_cube, 40, tnsz)
+```
+
+### Week 30-45
+
+```{r}
+ehsa_spt(spacetime_cube, 45, tnsz)
+```
+
+### Week 30-50
+
+```{r}
+ehsa_spt(spacetime_cube, 50, tnsz)
+```
+:::
+
+From weeks 30-35, the northern area of the island had predominantly coldspots, while the southern area mostly had no patterns detected, indicating a low number of cases. This suggests a localized outbreak that has not yet spread extensively.
+
+From weeks 30-40, however, we start to see oscillating hotspots appear in the centre. This indicates an unstable pattern of dengue transmission, with potential flare-ups of cases. The containment in the central area suggests some effectiveness of public health measures, preventing the spread to the periphery.
+
+From weeks 30-45, we begin to see the cases dwindling, as there are now many undetected patterns in the centre, while the edges remain the same with many coldspots.
+
+Finally, from weeks 30-50, the edges no longer have anymore colour, however we see that the hotspots have begun spreading from the centre towards the northern region. This could indicate a shift in focus of the outbreak, necessitating attention to the newly affected northern areas.
+
+Overall, these observations suggests a dengue outbreak that is dynamic, with periods of intensification and decline, and a geographic shift of the most affected areas over time. The patterns hint at the effectiveness of control measures in certain areas at certain times, but also at the need for sustained vigilance due to the possible resurgence of the disease and spread to new areas.
+
+## 9.0 Takeaways
+
+Reflecting on this course's geospatial analytics module, it's clear that the journey has been both rigorous and enriching. Through tackling this extensive take-home exercise, I've honed my skills in managing spatial data, leveraging R's powerful `sf`, `spdep`, and `sfdep` packages for intricate analyses. I've delved into spatial autocorrelation, interpreting local and global Moran's I, and have also dabbled in detecting and visualizing hotspots, which brought the theoretical concepts to life.
+
+The path to proficiency (or maybe semi-proficiency) wasn't straightforward; it demanded persistence and an eagerness to self-learn. I've navigated through a multitude of resources, from lecture slides to the valuable projects of seniors and peers. This process wasn't just about absorbing information but also about cultivating the ability to independently seek answers and piecing together a cohesive understanding from various learning materials.
+
+The experience has been intellectually demanding, yet it provided a comprehensive platform to test and expand my problem-solving capabilities. These technical and analytical skills are not only academic achievements but are transferable to a wide range of real-world applications, setting a strong foundation for future endeavors in data analytics, and I am eager to take on the next challenge of the project, where I am able to flex my creativity as well.
