@@ -259,3 +259,62 @@ write_rds(gwRF_adaptive, "data/model/gwRF_adaptive.rds")
 ```{r}
 gwRF_adaptive <- read_rds("data/model/gwRF_adaptive.rds")
 ```
+
+### 8.2 Predicting by using test data
+
+Combine test data with its corresponding coordinates data:
+
+```{r}
+test_data <- cbind(test_data, coords_test) %>%
+  st_drop_geometry()
+```
+
+Use *predict.grf()* of **SpatialML** package to predict the resale value by using the test data and gwRF_adaptive model calibrated earlier.
+
+```{r}
+gwRF_pred <- predict.grf(gwRF_adaptive, 
+                           test_data, 
+                           x.var.name="X",
+                           y.var.name="Y", 
+                           local.w=1,
+                           global.w=0)
+```
+
+```{r}
+GRF_pred <- write_rds(gwRF_pred, "data/model/GRF_pred.rds")
+```
+
+The output of *predict.grf()* is a vector of predicted values, so it will be better to convert to a data frame for further visualisation and analysis.
+
+```{r}
+GRF_pred <- read_rds("data/model/GRF_pred.rds")
+GRF_pred_df <- as.data.frame(GRF_pred)
+```
+
+Use *cbind()* to append the predicted values onto test_data:
+
+```{r}
+test_data_p <- cbind(test_data, GRF_pred_df)
+```
+
+```{r}
+write_rds(test_data_p, "data/model/test_data_p.rds")
+```
+
+### 8.3 Calculating Root Mean Square Error
+
+The Root Mean Square Error (RMSE) allows us to measure how far predicted values are from observed values in a regression analysis.
+
+```{r}
+rmse(test_data_p$resale_price, 
+     test_data_p$GRF_pred)
+```
+
+### 8.4 Visualising predicted values
+
+```{r}
+ggplot(data = test_data_p,
+       aes(x = GRF_pred,
+           y = resale_price)) +
+  geom_point()
+```
