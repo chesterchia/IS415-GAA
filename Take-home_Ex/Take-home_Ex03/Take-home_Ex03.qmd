@@ -119,13 +119,14 @@ Now, we can go back and merge *mpsz* with our filtered *popdata*.
 ```{r}
 merged <- merge(mpsz, pop2020filtered, by.x="SUBZONE_N", by.y="Subzone")
 write_rds(pop2020filtered, 'data/rds/pop2020.rds')
+write_rds(merged, 'data/rds/merged.rds')
 ```
 
 ## KDE
 
 ### Wrangling Supermarket Data
 
-We will read the supermarket data and performing necessary conversions for plotting into a KDE map. [**The data was pre-processed by my teammate Matthew, you may refer to it [here](https://is415-gaa-matthew-ho.netlify.app/takehomeex/takehomeex3/the3#handling-points).**]{.underline}
+We will read the supermarket data and perform necessary conversions for plotting into a KDE map. Supermarkets is just one of the options that the KDE map can be based on, we will use it as an example for this exercise. [**The data was pre-processed by my teammate Matthew, you may refer to it [here](https://is415-gaa-matthew-ho.netlify.app/takehomeex/takehomeex3/the3#handling-points).**]{.underline}
 
 ```{r}
 supermarkets <- read_rds("data/rds/supermarkets.rds")
@@ -157,13 +158,7 @@ any(duplicated(supermarkets_ppp_jit))
 
 ```{r}
 merged_owin <- read_rds("data/rds/merged_owin.rds")
-```
-
-```{r}
 supermarketsSG_ppp = supermarkets_ppp[merged_owin]
-```
-
-```{r}
 plot(supermarketsSG_ppp)
 ```
 
@@ -345,3 +340,123 @@ plot(L_aj, . -r ~ r,
      ylab= "L(d)-r", xlab = "d(m)")
 ```
 :::
+
+## Convert into functions for Shiny
+
+```{r}
+name2file <- new.env(hash=T, parent=emptyenv())
+
+name2file[["markets and food centres"]] <- "markets_and_food_centres.rds"
+name2file[["mrt"]] <- "mrt.rds"
+
+name2file[["atm"]] <- "poi_atm.rds"
+name2file[["bank"]] <- "poi_bank.rds"
+name2file[["beauty salon"]] <- "poi_beauty_salon.rds"
+name2file[["cafe"]] <- "poi_cafe.rds"
+name2file[["clothing store"]] <- "poi_clothing_store.rds"
+name2file[["convenience"]] <- "poi_convenience_store.rds"
+name2file[["dentist"]] <- "poi_dentist.rds"
+name2file[["doctor"]] <- "poi_doctor.rds"
+name2file[["gym"]] <- "poi_gym.rds"
+name2file[["hospital"]] <- "poi_hospital.rds"
+name2file[["library"]] <- "poi_library.rds"
+name2file[["lodging"]] <- "poi_lodging.rds"
+name2file[["night club"]] <- "poi_night_club.rds"
+name2file[["pow"]] <- "poi_place_of_worship.rds"
+name2file[["restaurant"]] <- "poi_restaurant.rds"
+name2file[["school"]] <- "poi_school.rds"
+name2file[["tourist"]] <- "poi_tourist_attraction.rds"
+
+name2file[["supermarkets"]] <- "supermarkets.rds"
+name2file[["bus"]] <- "bus_stop_sg.rds"
+```
+
+```{r}
+plot_kde <- function(bandwidth, bandwidthNum, kernel, point_type) {
+  merged <- read_rds("data/rds/merged.rds")
+  place <- read_rds(paste('data/rds/', name2file[[point_type]], sep="")) %>%
+    mutate(capacity = 500)
+  place_sp <- as_Spatial(place)
+  place_sp <- as(place_sp, "SpatialPoints")
+  place_ppp <- as(place_sp, "ppp")
+  place_ppp_jit <- rjitter(place_ppp,
+                                retry=TRUE,
+                                nsim=1,
+                                drop=TRUE)
+  merged_owin <- read_rds("data/rds/merged_owin.rds")
+  placeSG_ppp = place_ppp[merged_owin]
+  placeSG_ppp.km <- rescale(placeSG_ppp, 1000, "km")
+  if (bandwidth == "fixed") {
+    KDE <- density(placeSG_ppp.km, 
+             sigma=bandwidthNum, 
+             edge=TRUE, 
+             kernel=kernel)
+  } else if (bandwidth == "adaptive") {
+    KDE <- adaptive.density(placeSG_ppp.km, 
+             method="kernel")
+  } else if (bandwidth == "diggle") {
+    KDE <- density(placeSG_ppp.km, 
+             sigma=bw.diggle, 
+             edge=TRUE, 
+             kernel=kernel)
+  } else if (bandwidth == "cvl") {
+    KDE <- density(placeSG_ppp.km, 
+             sigma=bw.CvL, 
+             edge=TRUE, 
+             kernel=kernel)
+  } else if (bandwidth == "scott") {
+    KDE <- density(placeSG_ppp.km, 
+             sigma=bw.scott, 
+             edge=TRUE, 
+             kernel=kernel)
+  } else {
+    KDE <- density(placeSG_ppp.km, 
+             sigma=bw.ppl, 
+             edge=TRUE, 
+             kernel=kernel)
+  }
+  gridded <- as.SpatialGridDataFrame.im(KDE)
+  KDEraster <- raster(gridded)
+  projection(KDEraster) <- CRS("+init=EPSG:3414 +units=km")
+  tmap_mode("view")
+  tm_basemap(server="OpenStreetMap.HOT") +
+    tm_basemap(server = "Esri.WorldImagery") +
+    tm_shape(KDEraster) +
+  tm_raster("v",
+            title = "Kernel Density",
+            style = "pretty",
+            alpha = 0.6,
+            palette = c("#fafac3","#fd953b","#f02a75","#b62385","#021c9e")) +
+  tm_shape(merged)+
+  tm_polygons(alpha=0.1,
+              id="PLN_AREA_N", 
+              popup.vars=c(
+                "SUBZONE_N",
+                "Total",
+                "0 - 4",
+                "5 - 9",
+                "10 - 14",
+                "15 - 19",
+                "20 - 24",
+                "25 - 29",
+                "30 - 34",
+                "35 - 39",
+                "40 - 44",
+                "45 - 49",
+                "50 - 54",
+                "55 - 59",
+                "60 - 64",
+                "65 - 69",
+                "70 - 74",
+                "75 - 79",
+                "80 - 84",
+                "85 - 89",
+                "90 & Over"
+              ))+
+  tmap_options(check.and.fix = TRUE)
+}
+```
+
+```{r}
+plot_kde("ppl", 0, "gaussian", "school")
+```
