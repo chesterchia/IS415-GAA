@@ -1,0 +1,378 @@
+---
+title: "Take Home Exercise 3"
+author: "Chester Chia"
+---
+
+```{r}
+pacman::p_load(tidyverse, sf, tmap, maptools, spatstat, raster, tidyr, readxl, nngeo)
+```
+
+## Data Processing
+
+### Importing Singapore Census of Population Data
+
+```{r}
+pop2020 <- read_excel("data/aspatial/Singapore Census of Population (2020).xlsx", sheet=2, skip=4, col_names=TRUE)
+```
+
+There are many rows where the entire row comprises of NA values. These are irrelevant, so we will remove them first.
+
+```{r}
+pop2020 <- pop2020[rowSums(is.na(pop2020)) != ncol(pop2020),]
+```
+
+Next, we will do 3 things:
+
+-   Rename "Planning Area of Residence" for clarity
+-   Remove rows where any other column **except the first column** is "NA". We do not need any rows with NA values, but the first columns can be NA if they are subzones.
+-   Remove rows where the first column is "Planning Area of Residence" - this indicates the start of a new page, and is not data that we can use.
+
+```{r}
+colnames(pop2020)[1] = "Planning_Area"
+cols_to_check <- names(pop2020)[-1]
+pop2020 <- pop2020[complete.cases(pop2020[, cols_to_check]), ]
+pop2020 <- pop2020[!(pop2020$Planning_Area %in% "Planning Area of Residence"),]
+```
+
+Now to address the rows with the first column as "NA". We need to fill these up with their proper planning areas, which just so happen to be the last non-missing value. We can do this using the following function:
+
+```{r}
+fill_missing <- function(x) {
+  non_na_index <- which(!is.na(x))
+  last_non_na <- NA
+  for (i in 1:length(x)) {
+    if (is.na(x[i])) {
+      if (!is.na(last_non_na)) {
+        x[i] <- x[last_non_na]
+      }
+    } else {
+      last_non_na <- i
+    }
+  }
+  return(x)
+}
+
+pop2020$Planning_Area <- fill_missing(pop2020$Planning_Area)
+```
+
+Subsequently, we will clean up any typos and spaces that are not required.
+
+```{r}
+pop2020$Planning_Area <- gsub("\r\n", "", pop2020$Planning_Area)
+pop2020$Subzone <- gsub("\r\n", "", pop2020$Subzone)
+pop2020$Subzone <- toupper(pop2020$Subzone)
+
+pop2020$Subzone <- gsub("KANGNORTH", "KANG NORTH", pop2020$Subzone)
+
+pop2020$Planning_Area <- toupper(pop2020$Planning_Area)
+pop2020filtered <- pop2020[pop2020$Subzone != "TOTAL",]
+```
+
+### Importing MPSZ
+
+We want to merge this filtered dataset with mpsz later on, so we will import it now.
+
+```{r}
+mpsz <- st_read("data/geospatial/MasterPlan2019SubzoneBoundaryNoSeaKML.kml")
+```
+
+We will now perform pre-processing on the sf layer, including hole removal, as we will need to use the owin later on.
+
+```{r}
+mpsz <- mpsz %>%
+  mutate(Match=str_match_all(Description,"<td>(.*?)</td>")) %>%
+  mutate(Match=map(Match, ~ .[,2])) %>%
+  mutate(Match=map(Match,setNames,c("SUBZONE_NO","SUBZONE_N","SUBZONE_C","CA_IND", "PLN_AREA_N", "PLN_AREA_C", "REGION_N", "REGION_C", "INC_CRC", "FMEL_UPD_D"))) %>%
+  unnest_wider(Match) %>%
+  st_as_sf()
+
+mpsz <- mpsz %>%
+  dplyr::select('Name', 'geometry', 'SUBZONE_NO', 'SUBZONE_N', 'SUBZONE_C', 'PLN_AREA_N', 'PLN_AREA_C', 'REGION_N', 'REGION_C')
+
+mpsz <- st_make_valid(mpsz)
+mpsz <- st_zm(mpsz)
+mpsz <- st_transform(mpsz, crs=3414)
+```
+
+```{r}
+merged_sg <- st_union(mpsz) %>%
+    st_cast("POLYGON")
+
+merged_sg <- merged_sg[c(10)]
+merged_sg <- st_remove_holes(merged_sg)
+merged_sg <- st_as_sf(merged_sg)
+
+plot(st_geometry(merged_sg))
+```
+
+```{r}
+merged <- as_Spatial(merged_sg)
+merged_sp <- as(merged, "SpatialPolygons")
+merged_owin <- as(merged_sp, "owin")
+write_rds(merged_owin, "data/rds/merged_owin.rds")
+```
+
+### Merging Data
+
+Now, we can go back and merge *mpsz* with our filtered *popdata*.
+
+```{r}
+merged <- merge(mpsz, pop2020filtered, by.x="SUBZONE_N", by.y="Subzone")
+write_rds(pop2020filtered, 'data/rds/pop2020.rds')
+```
+
+### Importing Supermarket Data
+
+We will be importing supermarket data and performing similar processing to it as usual.
+
+```{r}
+supermarkets <- st_read("data/geospatial/SupermarketsKML.kml") %>% 
+  mutate(Match=str_match_all(Description,"<td>(.*?)</td>")) %>% 
+  mutate(Match=map(Match, ~ .[,2])) %>% 
+  mutate(Match=map(Match,setNames,c("LIC_NAME", "BLK_HOUSE", "STR_NAME", "UNIT_NO", "POSTCODE", "LIC_NO", "INC_CRC", "FMEL_UPD_D"))) %>% 
+  unnest_wider(Match) %>%
+  st_as_sf() %>% 
+  dplyr::select('LIC_NAME', 'geometry') %>% 
+  st_make_valid() %>%
+  st_zm() %>%
+  st_transform(crs = 3414)
+```
+
+```{r}
+any(is.na(supermarkets))
+```
+
+```{r}
+supermarkets$SUBTYPE <- ifelse(grepl("FAIRPRICE", supermarkets$LIC_NAME, ignore.case = TRUE), "FAIRPRICE",
+                     ifelse(grepl("COLD STORAGE", supermarkets$LIC_NAME, ignore.case = TRUE), "COLD STORAGE",
+                            ifelse(grepl("SHENG SIONG", supermarkets$LIC_NAME, ignore.case = TRUE), "SHENG SIONG", "OTHER")))
+```
+
+```{r}
+write_rds(supermarkets, 'data/rds/supermarkets.rds')
+```
+
+## KDE
+
+### Wrangling Supermarket Data
+
+We will read the supermarket data and performing necessary conversions for plotting into a KDE map.
+
+```{r}
+supermarkets <- read_rds("data/rds/supermarkets.rds")
+supermarkets_sp <- as_Spatial(supermarkets)
+supermarkets_sp <- as(supermarkets_sp, "SpatialPoints")
+supermarkets_ppp <- as(supermarkets_sp, "ppp")
+supermarkets_ppp
+```
+
+```{r}
+plot(supermarkets_ppp)
+```
+
+Handling duplicate points:
+
+```{r}
+any(duplicated(supermarkets_ppp))
+```
+
+```{r}
+supermarkets_ppp_jit <- rjitter(supermarkets_ppp,
+                                retry=TRUE,
+                                nsim=1,
+                                drop=TRUE)
+any(duplicated(supermarkets_ppp_jit))
+```
+
+### Combining point events object and owin object
+
+```{r}
+merged_owin <- read_rds("data/rds/merged_owin.rds")
+```
+
+```{r}
+supermarketsSG_ppp = supermarkets_ppp[merged_owin]
+```
+
+```{r}
+plot(supermarketsSG_ppp)
+```
+
+### KDE (Automatic Bandwidth)
+
+```{r}
+supermarketsSG_ppp.km <- rescale(supermarketsSG_ppp, 1000, "km")
+```
+
+::: panel-tabset
+#### bw.diggle()
+
+```{r}
+plot(density(supermarketsSG_ppp.km, 
+             sigma=bw.diggle, 
+             edge=TRUE, 
+             kernel="gaussian"), 
+     main="bw.diggle()")
+```
+
+#### bw.CvL()
+
+```{r}
+plot(density(supermarketsSG_ppp.km, 
+             sigma=bw.CvL, 
+             edge=TRUE, 
+             kernel="gaussian"), 
+     main="bw.CvL()")
+```
+
+#### bw.scott()
+
+```{r}
+plot(density(supermarketsSG_ppp.km, 
+             sigma=bw.scott, 
+             edge=TRUE, 
+             kernel="gaussian"), 
+     main="bw.scott()")
+```
+
+#### bw.ppl()
+
+```{r}
+plot(density(supermarketsSG_ppp.km, 
+             sigma=bw.ppl, 
+             edge=TRUE, 
+             kernel="gaussian"), 
+     main="bw.ppl()")
+```
+:::
+
+### KDE (Fixed Bandwidth)
+
+```{r}
+plot(density(supermarketsSG_ppp.km, 
+             sigma=0.6, 
+             edge=TRUE, 
+             kernel="gaussian"), 
+     main="Fixed Bandwidth (0.6)")
+```
+
+### KDE (Adaptive Bandwidth)
+
+```{r}
+plot(adaptive.density(supermarketsSG_ppp.km, 
+             method="kernel"), 
+     main="Adaptive Bandwidth")
+```
+
+### Converting KDE into Raster
+
+The KDE maps will be displayed in raster map, so I need to first convert it into a gridded object, and then raster. I will be using bw.ppl() automatic bandwidth KDE map as an example, but this will be applied to all KDE maps in the shiny app.
+
+```{r}
+kde_supermarketsSG.bw <- density(supermarketsSG_ppp.km,
+             sigma=bw.ppl,
+             edge=TRUE,
+             kernel="gaussian")
+```
+
+```{r}
+gridded_kde_supermarketsSG_bw <- as.SpatialGridDataFrame.im(kde_supermarketsSG.bw)
+spplot(gridded_kde_supermarketsSG_bw)
+```
+
+Now that it is a gridded object, I can convert it into RasterLayer object, and then including the CRS information.
+
+```{r}
+kde_supermarketsSG_bw_raster <- raster(gridded_kde_supermarketsSG_bw)
+kde_supermarketsSG_bw_raster
+```
+
+```{r}
+projection(kde_supermarketsSG_bw_raster) <- CRS("+init=EPSG:3414 +units=km")
+kde_supermarketsSG_bw_raster
+```
+
+Now we can plot an interactive KDE map with this raster layer.
+
+```{r}
+tmap_mode("view")
+tm_basemap(server="OpenStreetMap.HOT") +
+  tm_basemap(server = "Esri.WorldImagery") +
+  tm_shape(kde_supermarketsSG_bw_raster) +
+  tm_raster("v",
+            title = "Kernel Density",
+            style = "pretty",
+            alpha = 0.6,
+            palette = c("#fafac3","#fd953b","#f02a75","#b62385","#021c9e")) +
+  tm_shape(merged)+
+  tm_polygons(alpha=0.1,
+              id="PLN_AREA_N", 
+              popup.vars=c(
+                "SUBZONE_N",
+                "Total",
+                "0 - 4",
+                "5 - 9",
+                "10 - 14",
+                "15 - 19",
+                "20 - 24",
+                "25 - 29",
+                "30 - 34",
+                "35 - 39",
+                "40 - 44",
+                "45 - 49",
+                "50 - 54",
+                "55 - 59",
+                "60 - 64",
+                "65 - 69",
+                "70 - 74",
+                "75 - 79",
+                "80 - 84",
+                "85 - 89",
+                "90 & Over"
+              ))+
+  tmap_options(check.and.fix = TRUE)
+```
+
+## Second-Order Spatial Points Pattern Analysis
+
+I will be using the Aljunied subzone for demonstration purposes.
+
+```{r}
+mpsz_sp <- as_Spatial(mpsz)
+mpsz_sp
+aj = mpsz_sp[mpsz_sp@data$SUBZONE_N == "ALJUNIED",]
+aj_sp = as(aj, "SpatialPolygons")
+aj_owin = as(aj_sp, "owin")
+aj_ppp = supermarkets_ppp_jit[aj_owin]
+```
+
+::: panel-tabset
+#### G-function
+
+```{r}
+G_aj = Gest(aj_ppp, correction = "border")
+plot(G_aj, xlim=c(0,500))
+```
+
+#### F-function
+
+```{r}
+F_aj = Fest(aj_ppp)
+plot(F_aj)
+```
+
+#### K-function
+
+```{r}
+K_aj = Kest(aj_ppp, correction = "Ripley")
+plot(K_aj, . -r ~ r, ylab= "K(d)-r", xlab = "d(m)")
+```
+
+#### L-function
+
+```{r}
+L_aj = Lest(aj_ppp, correction="Ripley")
+plot(L_aj, . -r ~ r, 
+     ylab= "L(d)-r", xlab = "d(m)")
+```
+:::
