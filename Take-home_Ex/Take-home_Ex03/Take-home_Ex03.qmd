@@ -121,42 +121,11 @@ merged <- merge(mpsz, pop2020filtered, by.x="SUBZONE_N", by.y="Subzone")
 write_rds(pop2020filtered, 'data/rds/pop2020.rds')
 ```
 
-### Importing Supermarket Data
-
-We will be importing supermarket data and performing similar processing to it as usual.
-
-```{r}
-supermarkets <- st_read("data/geospatial/SupermarketsKML.kml") %>% 
-  mutate(Match=str_match_all(Description,"<td>(.*?)</td>")) %>% 
-  mutate(Match=map(Match, ~ .[,2])) %>% 
-  mutate(Match=map(Match,setNames,c("LIC_NAME", "BLK_HOUSE", "STR_NAME", "UNIT_NO", "POSTCODE", "LIC_NO", "INC_CRC", "FMEL_UPD_D"))) %>% 
-  unnest_wider(Match) %>%
-  st_as_sf() %>% 
-  dplyr::select('LIC_NAME', 'geometry') %>% 
-  st_make_valid() %>%
-  st_zm() %>%
-  st_transform(crs = 3414)
-```
-
-```{r}
-any(is.na(supermarkets))
-```
-
-```{r}
-supermarkets$SUBTYPE <- ifelse(grepl("FAIRPRICE", supermarkets$LIC_NAME, ignore.case = TRUE), "FAIRPRICE",
-                     ifelse(grepl("COLD STORAGE", supermarkets$LIC_NAME, ignore.case = TRUE), "COLD STORAGE",
-                            ifelse(grepl("SHENG SIONG", supermarkets$LIC_NAME, ignore.case = TRUE), "SHENG SIONG", "OTHER")))
-```
-
-```{r}
-write_rds(supermarkets, 'data/rds/supermarkets.rds')
-```
-
 ## KDE
 
 ### Wrangling Supermarket Data
 
-We will read the supermarket data and performing necessary conversions for plotting into a KDE map.
+We will read the supermarket data and performing necessary conversions for plotting into a KDE map. [**The data was pre-processed by my teammate Matthew, you may refer to it [here](https://is415-gaa-matthew-ho.netlify.app/takehomeex/takehomeex3/the3#handling-points).**]{.underline}
 
 ```{r}
 supermarkets <- read_rds("data/rds/supermarkets.rds")
@@ -292,7 +261,7 @@ projection(kde_supermarketsSG_bw_raster) <- CRS("+init=EPSG:3414 +units=km")
 kde_supermarketsSG_bw_raster
 ```
 
-Now we can plot an interactive KDE map with this raster layer.
+Now we can plot an interactive KDE map with this raster layer. [**I referenced my classmateKhant's Take-Home Exercise 01 for this section, you may refer to it [here](https://is415-geospatial-with-khant.netlify.app/take-home_ex/take-home_ex01#plotting-interactive-kde-maps).**]{.underline}
 
 ```{r}
 tmap_mode("view")
