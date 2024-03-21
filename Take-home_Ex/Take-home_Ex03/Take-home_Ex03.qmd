@@ -1,15 +1,32 @@
 ---
 title: "Take Home Exercise 3"
 author: "Chester Chia"
+date: "10th March 2024"
 ---
 
 ```{r}
 pacman::p_load(tidyverse, sf, tmap, maptools, spatstat, raster, tidyr, readxl, nngeo)
 ```
 
-## Data Processing
+## 0.0 Overview
 
-### Importing Singapore Census of Population Data
+For my team's project we had three planned features:
+
+-   Exploratory Data Analysis
+-   Kernel Density Estimation
+-   Spatial Clustering
+
+However, we have revised our features, and now have the following features:
+
+-   Exploratory Data Analysis
+-   **Spatial Point Patterns Analysis**
+-   Accessibility Modelling
+
+For this take-home exercise, I will be working on the second module, **Spatial Points Patterns Analysis**. This will include generating KDE maps and performing 2nd order SPPA based on variables that can be controlled by the user.
+
+## 1.0 Data Processing
+
+### 1.1 Importing Singapore Census of Population Data
 
 ```{r}
 pop2020 <- read_excel("data/aspatial/Singapore Census of Population (2020).xlsx", sheet=2, skip=4, col_names=TRUE)
@@ -68,7 +85,7 @@ pop2020$Planning_Area <- toupper(pop2020$Planning_Area)
 pop2020filtered <- pop2020[pop2020$Subzone != "TOTAL",]
 ```
 
-### Importing MPSZ
+### 1.2 Importing MPSZ
 
 We want to merge this filtered dataset with mpsz later on, so we will import it now.
 
@@ -112,21 +129,63 @@ merged_owin <- as(merged_sp, "owin")
 write_rds(merged_owin, "data/rds/merged_owin.rds")
 ```
 
-### Merging Data
+### 1.3 Merging Data
 
-Now, we can go back and merge *mpsz* with our filtered *popdata*.
+Now, we can go back and merge *mpsz* with our filtered *popdata*. Then, rename some columns and combine some age groups for easier display.
 
 ```{r}
 merged <- merge(mpsz, pop2020filtered, by.x="SUBZONE_N", by.y="Subzone")
+colnames(merged)[colnames(merged) == "SUBZONE_N"] <- "Subzone"
+colnames(merged)[colnames(merged) == "REGION_N"] <- "Region"
+colnames(merged)[colnames(merged) == "Total"] <- "Total Population"
+
+columns_to_replace <- c(
+                "0 - 4",
+                "5 - 9",
+                "10 - 14",
+                "15 - 19",
+                "20 - 24",
+                "25 - 29",
+                "30 - 34",
+                "35 - 39",
+                "40 - 44",
+                "45 - 49",
+                "50 - 54",
+                "55 - 59",
+                "60 - 64",
+                "65 - 69",
+                "70 - 74",
+                "75 - 79",
+                "80 - 84",
+                "85 - 89",
+                "90 & Over")
+
+for (col in columns_to_replace) {
+  merged[[col]] <- gsub("-", "0", merged[[col]])
+}
+merged[["Total Population"]] <- gsub("-", "0", merged[[col]])
+for (col in columns_to_replace) {
+  merged[[col]] <- as.numeric(merged[[col]])
+}
+
+merged$`9 and under` <- merged$`0 - 4` + merged$`5 - 9`
+merged$`10-19` <- merged$`10 - 14` + merged$`15 - 19`
+merged$`20-29` <- merged$`20 - 24` + merged$`25 - 29`
+merged$`30-39` <- merged$`30 - 34` + merged$`35 - 39`
+merged$`40-49` <- merged$`40 - 44` + merged$`45 - 49`
+merged$`50-59` <- merged$`50 - 54` + merged$`55 - 59`
+merged$`60-69` <- merged$`60 - 64` + merged$`65 - 69`
+merged$`70 and above` <- merged$`70 - 74` + merged$`75 - 79` + merged$`80 - 84` + merged$`85 - 89` +  + merged$`90 & Over`
+merged <- merged[, !colnames(merged) %in% columns_to_replace]
 write_rds(pop2020filtered, 'data/rds/pop2020.rds')
 write_rds(merged, 'data/rds/merged.rds')
 ```
 
-## KDE
+## 2.0 KDE
 
-### Wrangling Supermarket Data
+### 2.1 Wrangling Supermarket Data
 
-We will read the supermarket data and perform necessary conversions for plotting into a KDE map. Supermarkets is just one of the options that the KDE map can be based on, we will use it as an example for this exercise. [**The data was pre-processed by my teammate Matthew, you may refer to it [here](https://is415-gaa-matthew-ho.netlify.app/takehomeex/takehomeex3/the3#handling-points).**]{.underline}
+We will read the supermarket data and perform necessary conversions for plotting into a KDE map. Supermarkets is just one of the variables for the KDE map, we will use it as an example for this exercise. [**The data was pre-processed by my teammate Matthew, you may refer to it [here](https://is415-gaa-matthew-ho.netlify.app/takehomeex/takehomeex3/the3#handling-points).**]{.underline}
 
 ```{r}
 supermarkets <- read_rds("data/rds/supermarkets.rds")
@@ -154,7 +213,7 @@ supermarkets_ppp_jit <- rjitter(supermarkets_ppp,
 any(duplicated(supermarkets_ppp_jit))
 ```
 
-### Combining point events object and owin object
+### 2.2 Combining point events object and owin object
 
 ```{r}
 merged_owin <- read_rds("data/rds/merged_owin.rds")
@@ -162,7 +221,7 @@ supermarketsSG_ppp = supermarkets_ppp[merged_owin]
 plot(supermarketsSG_ppp)
 ```
 
-### KDE (Automatic Bandwidth)
+### 2.3 KDE (Automatic Bandwidth)
 
 ```{r}
 supermarketsSG_ppp.km <- rescale(supermarketsSG_ppp, 1000, "km")
@@ -210,7 +269,7 @@ plot(density(supermarketsSG_ppp.km,
 ```
 :::
 
-### KDE (Fixed Bandwidth)
+### 2.4 KDE (Fixed Bandwidth)
 
 ```{r}
 plot(density(supermarketsSG_ppp.km, 
@@ -220,7 +279,7 @@ plot(density(supermarketsSG_ppp.km,
      main="Fixed Bandwidth (0.6)")
 ```
 
-### KDE (Adaptive Bandwidth)
+### 2.5 KDE (Adaptive Bandwidth)
 
 ```{r}
 plot(adaptive.density(supermarketsSG_ppp.km, 
@@ -228,7 +287,7 @@ plot(adaptive.density(supermarketsSG_ppp.km,
      main="Adaptive Bandwidth")
 ```
 
-### Converting KDE into Raster
+### 2.6 Converting KDE into Raster
 
 The KDE maps will be displayed in raster map, so I need to first convert it into a gridded object, and then raster. I will be using bw.ppl() automatic bandwidth KDE map as an example, but this will be applied to all KDE maps in the shiny app.
 
@@ -272,38 +331,28 @@ tm_basemap(server="OpenStreetMap.HOT") +
   tm_polygons(alpha=0.1,
               id="PLN_AREA_N", 
               popup.vars=c(
-                "SUBZONE_N",
-                "Total",
-                "0 - 4",
-                "5 - 9",
-                "10 - 14",
-                "15 - 19",
-                "20 - 24",
-                "25 - 29",
-                "30 - 34",
-                "35 - 39",
-                "40 - 44",
-                "45 - 49",
-                "50 - 54",
-                "55 - 59",
-                "60 - 64",
-                "65 - 69",
-                "70 - 74",
-                "75 - 79",
-                "80 - 84",
-                "85 - 89",
-                "90 & Over"
+                "Subzone",
+                "Region",
+                "Total Population",
+                "9 and under",
+                "10-19",
+                "20-29",
+                "30-39",
+                "40-49",
+                "50-59",
+                "60-69",
+                "70 and above"
               ))+
   tmap_options(check.and.fix = TRUE)
 ```
 
-## Second-Order Spatial Points Pattern Analysis
+## 3.0 Second-Order Spatial Points Pattern Analysis
 
 I will be using the Aljunied subzone for demonstration purposes.
 
 ```{r}
 mpsz_sp <- as_Spatial(mpsz)
-mpsz_sp
+write_rds(mpsz_sp, "data/rds/mpsz_sp.rds")
 aj = mpsz_sp[mpsz_sp@data$SUBZONE_N == "ALJUNIED",]
 aj_sp = as(aj, "SpatialPolygons")
 aj_owin = as(aj_sp, "owin")
@@ -341,13 +390,12 @@ plot(L_aj, . -r ~ r,
 ```
 :::
 
-## Convert into functions for Shiny
+## 4.0 Convert into functions for Shiny
+
+### 4.1 Setting up files
 
 ```{r}
 name2file <- new.env(hash=T, parent=emptyenv())
-
-name2file[["markets and food centres"]] <- "markets_and_food_centres.rds"
-name2file[["mrt"]] <- "mrt.rds"
 
 name2file[["atm"]] <- "poi_atm.rds"
 name2file[["bank"]] <- "poi_bank.rds"
@@ -367,9 +415,13 @@ name2file[["restaurant"]] <- "poi_restaurant.rds"
 name2file[["school"]] <- "poi_school.rds"
 name2file[["tourist"]] <- "poi_tourist_attraction.rds"
 
-name2file[["supermarkets"]] <- "supermarkets.rds"
 name2file[["bus"]] <- "bus_stop_sg.rds"
+name2file[["markets and food centres"]] <- "markets_and_food_centres.rds"
+name2file[["mrt"]] <- "mrt.rds"
+name2file[["supermarkets"]] <- "supermarkets.rds"
 ```
+
+### 4.2 KDE Function
 
 ```{r}
 plot_kde <- function(bandwidth, bandwidthNum, kernel, point_type) {
@@ -431,32 +483,71 @@ plot_kde <- function(bandwidth, bandwidthNum, kernel, point_type) {
   tm_polygons(alpha=0.1,
               id="PLN_AREA_N", 
               popup.vars=c(
-                "SUBZONE_N",
-                "Total",
-                "0 - 4",
-                "5 - 9",
-                "10 - 14",
-                "15 - 19",
-                "20 - 24",
-                "25 - 29",
-                "30 - 34",
-                "35 - 39",
-                "40 - 44",
-                "45 - 49",
-                "50 - 54",
-                "55 - 59",
-                "60 - 64",
-                "65 - 69",
-                "70 - 74",
-                "75 - 79",
-                "80 - 84",
-                "85 - 89",
-                "90 & Over"
+                "Subzone",
+                "Region",
+                "Total Population",
+                "9 and under",
+                "10-19",
+                "20-29",
+                "30-39",
+                "40-49",
+                "50-59",
+                "60-69",
+                "70 and above"
               ))+
   tmap_options(check.and.fix = TRUE)
 }
 ```
 
 ```{r}
-plot_kde("ppl", 0, "gaussian", "school")
+plot_kde("fixed", 0.4, "gaussian", "school")
 ```
+
+### 4.3 2nd Order SPPA Function
+
+```{r}
+plot_sppa <- function(subzone, whichFunction, point_type, nsim) {
+  mpsz_sp <- read_rds("data/rds/mpsz_sp.rds")
+  sz = mpsz_sp[mpsz_sp@data$SUBZONE_N == toupper(subzone),]
+  sz_sp = as(sz, "SpatialPolygons")
+  sz_owin = as(sz_sp, "owin")
+  place <- read_rds(paste('data/rds/', name2file[[point_type]], sep="")) %>%
+    mutate(capacity = 500)
+  place_sp <- as_Spatial(place)
+  place_sp <- as(place_sp, "SpatialPoints")
+  place_ppp <- as(place_sp, "ppp")
+  place_ppp_jit <- rjitter(place_ppp,
+                                retry=TRUE,
+                                nsim=1,
+                                drop=TRUE)
+  sz_ppp = place_ppp_jit[sz_owin]
+  
+  if (tolower(whichFunction) == "g") {
+    plot(envelope(sz_ppp, Gest, correction="all", nsim=nsim))
+  } else if (tolower(whichFunction) == "f") {
+    plot(envelope(sz_ppp, Fest, correction="all", nsim=nsim))
+  } else if (tolower(whichFunction) == "k") {
+    K.csr <- envelope(sz_ppp, Kest, nsim=nsim, rank=1, glocal=TRUE)
+    plot(K.csr, . - r ~ r, 
+     xlab="d", ylab="K(d)-r", xlim=c(0,500))
+  } else {
+    L.csr <- envelope(sz_ppp, Lest, nsim=nsim, rank=1, glocal=TRUE)
+    plot(L.csr, . - r ~ r, 
+     xlab="d", ylab="L(d)-r", xlim=c(0,500))
+  }
+}
+```
+
+```{r}
+plot_sppa("aljunied", "f", "doctor", 99)
+```
+
+## 5.0 UI Design
+
+### 5.1 KDE
+
+![](images/clipboard-2598049809.png)
+
+### 5.2 Second-Order SPPA
+
+![](images/clipboard-2210365996.png)
