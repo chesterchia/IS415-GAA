@@ -16,13 +16,13 @@ For my team's project we had three planned features:
 -   Kernel Density Estimation
 -   Spatial Clustering
 
-However, we have revised our features, and now have the following features:
+Upon reviewing feedback, we have revised our features to these:
 
 -   Exploratory Data Analysis
 -   **Spatial Point Patterns Analysis**
 -   Accessibility Modelling
 
-For this take-home exercise, I will be working on the second module, **Spatial Points Patterns Analysis**. This will include generating KDE maps and performing 2nd order SPPA based on variables that can be controlled by the user.
+For this take-home exercise, I will be working on the second module, **Spatial Points Patterns Analysis**. This will include generating KDE maps and performing 2nd order SPPA based on variables that are set as inputs by the user.
 
 ## 1.0 Data Processing
 
@@ -163,7 +163,7 @@ columns_to_replace <- c(
 for (col in columns_to_replace) {
   merged[[col]] <- gsub("-", "0", merged[[col]])
 }
-merged[["Total Population"]] <- gsub("-", "0", merged[[col]])
+merged[["Total Population"]] <- gsub("-", "0", merged[["Total Population"]])
 for (col in columns_to_replace) {
   merged[[col]] <- as.numeric(merged[[col]])
 }
@@ -546,8 +546,12 @@ plot_sppa("aljunied", "f", "doctor", 99)
 
 ### 5.1 KDE
 
-![](images/clipboard-2598049809.png)
+![](images/clipboard-2083650471.png)
+
+This module will be accessible by the navigation bar under SPPA. Above the map, there are 5 tabs for KDE and the different functions. The menu on the left will change depending on which tab is selected, so that the appropriate input fields will be shown. For KDE, the user will be able to select the **point type**, in this case *schools*, the **bandwidth**, which will have a separate field appear when selected as *fixed* bandwidth for the user to input the bandwidth value, as well as the **kernel**, in this case *gaussian*.
 
 ### 5.2 Second-Order SPPA
 
 ![](images/clipboard-2210365996.png)
+
+For the functions, the menu will be the same - users will be able to select once again the **point type**, in this case *doctors*, the **subzone**, in this case *Aljunied*, and the **number of simulations**, in this case *99*.
